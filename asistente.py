@@ -40,9 +40,18 @@ SILENCIO_FINAL = 0.8   # segundos de silencio para dar la frase por terminada
 ESPERA_INICIAL = 5.0   # segundos esperando a que empieces a hablar
 MAX_DURACION = 30.0    # tope duro por si el ruido nunca deja ver silencio
 
-SISTEMA = """Eres un asistente de voz. Respondes en espanol, en frases cortas,
-como hablaria una persona. Nada de listas ni markdown: esto se lee en voz alta.
-Si necesitas una herramienta, usala sin anunciarlo."""
+NOMBRE = "JARVIS"
+
+# Se dice sola despues de cada herramienta ejecutada con exito. Va en codigo
+# y no en el prompt a proposito: un modelo de 3B se olvida, el codigo no.
+CONFIRMACION = "Tarea hecha, señor."
+
+SISTEMA = """Te llamas Jarvis. Eres el asistente personal de tu usuario y
+te diriges a el como "señor".
+
+Respondes en espanol, en frases cortas, como hablaria una persona. Nada de
+listas ni markdown: esto se lee en voz alta. Si necesitas una herramienta,
+usala sin anunciarlo."""
 
 
 # ------------------------------------------------------------------ herramientas
@@ -347,7 +356,7 @@ def hablar(texto: str):
         sd.wait()
     except Exception as e:
         print(f"  [TTS no disponible: {e}]")
-        print(f"  ASISTENTE: {texto}")
+        print(f"  {NOMBRE}: {texto}")
 
 
 # -------------------------------------------------------------------------- LLM
@@ -368,8 +377,10 @@ def preguntar(historial: list, herramientas: list) -> dict:
     return r.json()["message"]
 
 
-def ejecutar_herramientas(mensaje: dict) -> list:
+def ejecutar_herramientas(mensaje: dict) -> tuple[list, bool]:
+    """Devuelve los resultados y si todas salieron bien."""
     resultados = []
+    todo_ok = True
     for llamada in mensaje.get("tool_calls", []):
         nombre = llamada["function"]["name"]
         args = llamada["function"].get("arguments", {})
@@ -379,13 +390,15 @@ def ejecutar_herramientas(mensaje: dict) -> list:
         print(f"  [herramienta: {nombre}({args})]")
         if nombre not in HERRAMIENTAS:
             salida = f"Error: no existe la herramienta {nombre}"
+            todo_ok = False
         else:
             try:
                 salida = HERRAMIENTAS[nombre]["fn"](**args)
             except Exception as e:
                 salida = f"Error ejecutando {nombre}: {e}"
+                todo_ok = False
         resultados.append({"role": "tool", "content": str(salida), "name": nombre})
-    return resultados
+    return resultados, todo_ok
 
 
 # ------------------------------------------------------------------------ bucle
@@ -421,12 +434,16 @@ def main():
 
             # Una sola ronda de herramientas. Encadenar varias rompe a los modelos
             # chicos, asi que por ahora no lo intentamos.
+            hubo_tarea = False
             if respuesta.get("tool_calls"):
-                historial.extend(ejecutar_herramientas(respuesta))
+                resultados, hubo_tarea = ejecutar_herramientas(respuesta)
+                historial.extend(resultados)
                 respuesta = preguntar(historial, [])
                 historial.append(respuesta)
 
             contenido = respuesta.get("content", "").strip()
+            if hubo_tarea:
+                contenido = f"{contenido} {CONFIRMACION}".strip()
             if contenido:
                 hablar(contenido)
 
