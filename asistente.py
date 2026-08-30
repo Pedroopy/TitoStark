@@ -56,14 +56,28 @@ def tomar_nota(texto: str) -> str:
 def abrir_app(nombre: str) -> str:
     import subprocess
     # Lista blanca a proposito. Nunca dejes que el modelo arme el comando.
+    # Rutas absolutas de Windows: el modelo elige una clave, no escribe el path.
     permitidas = {
-        "navegador": ["firefox"],
-        "terminal": ["gnome-terminal"],
-        "editor": ["code"],
+        "navegador": [r"C:\Program Files\Mozilla Firefox\firefox.exe"],
+        "terminal": [
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        ],
+        "editor": [
+            r"C:\Users\Administrator\AppData\Local\Programs"
+            r"\Microsoft VS Code\Code.exe"
+        ],
+        "notas": [
+            r"C:\Users\Administrator\AppData\Local\Programs"
+            r"\Obsidian\Obsidian.exe"
+        ],
+        "explorador": [r"C:\Windows\explorer.exe"],
     }
     if nombre not in permitidas:
         return f"No conozco la app {nombre}"
-    subprocess.Popen(permitidas[nombre])
+    try:
+        subprocess.Popen(permitidas[nombre])
+    except OSError as e:
+        return f"No pude abrir {nombre}: {e}"
     return f"Abriendo {nombre}"
 
 

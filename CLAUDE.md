@@ -208,3 +208,49 @@ ollama pull qwen3:4b
 3. Decidir si se adopta Home Assistant como columna vertebral o se sigue con
    orquestador propio
 4. Agregar openWakeWord y Silero VAD
+
+---
+
+## Mediciones reales del equipo (30-08-2026)
+
+Entorno montado y verificado: Python 3.12.10, venv en `.venv`, Ollama 0.33.2,
+`qwen3:4b` descargado (2.5 GB), GTX 1650 con 4096 MiB confirmados.
+
+### El modelo no entra completo en la GPU
+
+| Contexto | Reparto CPU/GPU | Tamaño en memoria | Velocidad |
+|---|---|---|---|
+| 8192 | 45% / 55% | 4.1 GB | ~11 tok/s |
+| 4096 | 33% / 67% | 3.5 GB | ~16 tok/s |
+
+El supuesto de "contexto 8192" del diseño original no se sostiene: a 8K casi la
+mitad del modelo queda en CPU. Bajar a 4096 recupera velocidad, pero ni así entra
+entero. La estimación de ~30 tok/s no se cumple en ninguna configuración.
+
+### Qwen3 razona antes de responder, y eso domina la latencia
+
+Es un modelo de razonamiento: genera un bloque de pensamiento antes de contestar.
+Para "¿qué hora es si son las tres de la tarde?" gastó 659 tokens en producir una
+respuesta de seis palabras.
+
+- Sin mitigar, contexto 8192: **155 a 171 segundos**
+- Con `/no_think` al inicio del prompt de sistema y contexto 4096: **37 segundos**
+
+El parámetro `think: false` de la API de Ollama **no funciona** con este modelo en
+la versión 0.33.2: el razonamiento se filtra al contenido de la respuesta, en
+inglés. La directiva `/no_think` dentro del mensaje de sistema sí limpia la salida.
+
+### Conclusión
+
+37 segundos contra el objetivo de 2 a 4 segundos del documento. La brecha no se
+cierra optimizando: hay que cambiar de modelo. Un modelo sin razonamiento y más
+chico (rango 1.5B a 3B) es el camino para la semana 1, dejando `qwen3:4b` para
+cuando exista la RTX 3060 de 12 GB de la ruta de upgrade.
+
+### Estado del entorno
+
+- `abrir_app` adaptado a Windows con rutas absolutas: Firefox, PowerShell,
+  VS Code, Obsidian y el explorador. La lista blanca cerrada se mantiene.
+- Micrófono detectado: headset HyperX. Sirve para push-to-talk de cerca; el
+  micrófono con array del documento sigue pendiente para uso a distancia.
+- `torch` quedó en versión CPU, que es lo deseado: no compite por VRAM.

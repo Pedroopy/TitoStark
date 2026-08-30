@@ -1,0 +1,15 @@
+# Captura y reproduccion de audio
+sounddevice==0.5.1
+numpy==2.2.1
+
+# Transcripcion (CPU, int8)
+faster-whisper==1.1.1
+
+# Corte de voz
+silero-vad==5.1.2
+
+# Cliente HTTP hacia Ollama
+requests==2.32.3
+
+# Sintesis de voz
+kokoro-onnx==0.4.9
