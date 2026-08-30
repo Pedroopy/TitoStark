@@ -470,3 +470,85 @@ error, para no sonar tras una charla cualquiera ni tapar un fallo.
   sistema, si llega a molestar.
 - Los ajustes del VAD están atados al headset. Con el micrófono de array habrá
   que **subir** `UMBRAL_VOZ`, porque captará más ambiente.
+
+---
+
+## Memoria: el vault de Obsidian
+
+Un vault de Obsidian es solo una carpeta con archivos `.md`. No hay API, ni
+plugin, ni servidor: Jarvis escribe archivos, Obsidian los muestra al instante.
+Eso convierte la "memoria persistente entre sesiones" del mes 2 en algo que ya
+está funcionando.
+
+**Ubicación: `C:\Users\Administrator\Documents\Jarvis`**, deliberadamente **fuera
+del repositorio**. Las conversaciones son personales y no tienen por qué acabar
+en GitHub.
+
+```
+Jarvis/
+├── Conversaciones/    2026-08-30.md — cada turno, con su hora
+└── Notas/             2026-08-30.md — lo que se dicta con "anota que..."
+```
+
+Para verlo en Obsidian: *Open folder as vault* y elegir esa carpeta.
+
+### Se escribe sola, no por herramienta
+
+`registrar_turno()` guarda cada intercambio al final del bucle. **No** es una
+herramienta que el modelo decida llamar: si dependiera de que un 3B se acuerde,
+la memoria tendría agujeros y no se notaría hasta necesitarla.
+
+`tomar_nota` ya no escribe en `notas.txt`, sino en el vault. Solo **añade** al
+final: nunca modifica ni borra notas existentes, así un modelo confundido no
+puede estropear lo ya escrito.
+
+### Se lee sola también, y esto costó llegar
+
+El primer diseño fue una herramienta `buscar_en_memoria` que el modelo llamaba
+cuando le pareciera. **No funcionó**, y el camino hasta entenderlo vale la pena
+anotarlo:
+
+1. Con el enrutador filtrando por palabras clave, "cuándo es el cumpleaños de mi
+   hermana" no disparaba nada: ninguna palabra delata que se pregunta por el
+   pasado.
+2. Ofreciendo la herramienta siempre, el modelo simplemente no la usaba y
+   respondía "no tengo esa información".
+3. Reforzando el prompt de sistema para obligarlo, **se rompió el resto del tool
+   calling**: hasta `obtener_hora` dejó de funcionar. Instrucciones largas
+   compiten con las herramientas en un modelo chico.
+
+La solución es no darle la decisión: `recordar()` corre en **cada** turno, busca
+en el vault y, si encuentra algo, lo inyecta como mensaje de sistema solo para
+esa pregunta. El modelo recibe el material servido en vez de tener que pedirlo.
+
+El recuerdo no se guarda en el historial, que ya va justo con 8K de contexto.
+
+### Cómo busca
+
+Palabras clave sobre los `.md`, sin acentos y comparando también por raíz de
+palabra — sin eso, "cumpleaños" no empataba con "cumple años" y el caso más
+obvio fallaba. Puntúa por claves distintas encontradas, desempata por
+repeticiones y luego por fecha. Devuelve como mucho 4 fragmentos y 900
+caracteres: a un 3B se le degrada la respuesta si se le inunda el contexto.
+
+### Verificado
+
+| Se preguntó | Resultado |
+|---|---|
+| "cuándo es el cumpleaños de mi hermana" | recuperó la fecha de una conversación de 5 días antes |
+| "de qué hablamos del micrófono" | recuperó el hilo correcto |
+| "cuál era la clave del wifi de mi tía" | recuperó el dato exacto |
+| "hola qué tal" | sin recuerdo, sin ruido |
+| "qué hora es" / "pon un video" / "anota que..." | herramientas intactas |
+
+Siete de siete, con el tool calling sin regresiones.
+
+### El límite real
+
+Es búsqueda por palabras, no por significado. "¿Qué tarjeta gráfica quería
+comprar?" **no** encuentra la conversación sobre la RTX 3060, porque no comparten
+ninguna palabra. Para eso haría falta búsqueda por embeddings.
+
+No conviene hacerlo todavía: añade un modelo más peleando por recursos, un índice
+que mantener, y deja de poder depurarse leyendo los archivos. Cuando el vault
+tenga cientos de notas y esto moleste de verdad, será el momento.

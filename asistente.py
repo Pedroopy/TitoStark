@@ -18,7 +18,9 @@ Uso:
 """
 
 import json
+import pathlib
 import queue
+import re
 import sys
 import threading
 
@@ -62,14 +64,185 @@ usala sin anunciarlo."""
 # Cada herramienta es una funcion normal mas su descripcion en formato OpenAI.
 # El enrutador de abajo decide cual subconjunto se le muestra al modelo.
 
+# ------------------------------------------------------------- vault (Obsidian)
+
+# Un vault de Obsidian es solo una carpeta con archivos .md. No hace falta
+# plugin ni API: Jarvis escribe archivos, Obsidian los muestra al instante.
+# Vive FUERA del repositorio: las conversaciones son personales.
+VAULT = pathlib.Path(r"C:\Users\Administrator\Documents\Jarvis")
+CONVERSACIONES = VAULT / "Conversaciones"
+NOTAS = VAULT / "Notas"
+
+# Cuanto texto recuperado se le pasa al modelo. Un 3B se degrada si le
+# inundas el contexto, asi que conviene poco y bueno.
+MAX_CONTEXTO = 900
+MAX_FRAGMENTOS = 4
+
+# Palabras que no sirven para buscar: aparecen en todas las notas.
+VACIAS = {
+    "que", "como", "cuando", "donde", "quien", "cual", "para", "por", "con",
+    "sin", "los", "las", "del", "una", "uno", "unos", "unas", "este", "esta",
+    "esto", "eso", "ese", "esa", "mas", "muy", "sobre", "algo", "todo", "toda",
+    "hay", "fue", "era", "son", "estoy", "tengo", "tiene", "hacer", "dijo",
+    "dije", "anote", "anota", "acuerdas", "recuerdas", "habia", "senor",
+    "jarvis", "yo", "mi", "me", "tu", "te", "se", "lo", "la", "el", "un",
+}
+
+
+def _asegurar_vault():
+    CONVERSACIONES.mkdir(parents=True, exist_ok=True)
+    NOTAS.mkdir(parents=True, exist_ok=True)
+
+
+def _hoy() -> str:
+    from datetime import datetime
+
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def registrar_turno(usuario: str, jarvis: str):
+    """Guarda cada intercambio en la nota del dia.
+
+    No es una herramienta: corre solo, en cada turno. Si el modelo tuviera
+    que acordarse de llamarla, la memoria tendria agujeros.
+    """
+    from datetime import datetime
+
+    if not usuario.strip():
+        return
+    try:
+        _asegurar_vault()
+        archivo = CONVERSACIONES / f"{_hoy()}.md"
+        nuevo = not archivo.exists()
+        with archivo.open("a", encoding="utf-8") as f:
+            if nuevo:
+                f.write(f"# Conversaciones del {_hoy()}\n\n#conversacion\n")
+            f.write(f"\n## {datetime.now().strftime('%H:%M')}\n")
+            f.write(f"**Yo:** {usuario.strip()}\n\n")
+            if jarvis.strip():
+                f.write(f"**Jarvis:** {jarvis.strip()}\n")
+    except OSError as e:
+        print(f"  [no pude escribir en el vault: {e}]")
+
+
+def _normalizar(texto: str) -> str:
+    """Minusculas y sin acentos: "cumpleanos" tiene que empatar con "anos"."""
+    import unicodedata
+
+    sin_tildes = unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in sin_tildes if unicodedata.category(c) != "Mn")
+
+
+def _coincide(clave: str, bloque: str) -> bool:
+    """Empata la palabra entera o su raiz, para que "cumpleanos" encuentre
+    "cumple anos", que es como lo dijo el usuario en su momento."""
+    if clave in bloque:
+        return True
+    return len(clave) >= 6 and clave[:6] in bloque
+
+
+def _claves(texto: str) -> list:
+    palabras = re.findall(r"\w{4,}", _normalizar(texto), re.UNICODE)
+    return [p for p in palabras if p not in VACIAS]
+
+
+def _bloques(texto: str):
+    """Parte una nota en unidades que tenga sentido devolver enteras:
+    cada turno de conversacion, y cada vinieta de una lista por separado."""
+    for trozo in re.split(r"\n(?=## )|\n\n+", texto):
+        trozo = trozo.strip()
+        if not trozo or trozo.startswith("# "):
+            continue
+        # Una lista de notas son varias cosas distintas, no un solo bloque.
+        if trozo.lstrip().startswith("- "):
+            for linea in trozo.splitlines():
+                linea = linea.strip()
+                if len(linea) > 10:
+                    yield linea
+        elif len(trozo) >= 15:
+            yield trozo
+
+
+def recordar(texto: str) -> str | None:
+    """Busca en el vault y devuelve contexto relevante, o None.
+
+    Esto NO es una herramienta. Corre solo, antes de cada pregunta, y el
+    resultado se inyecta en el contexto. La razon: un modelo de 3B no
+    decide de forma fiable cuando le hace falta recordar algo, y reforzar
+    el prompt para que lo haga degrada el resto del tool calling. Buscar
+    siempre y dejarle el material servido funciona; pedirle que lo pida, no.
+    """
+    claves = _claves(texto)
+    if not claves:
+        return None
+    # Una sola coincidencia basta: exigir dos dejaba fuera casos obvios,
+    # porque nadie repite las mismas palabras al preguntar que al contar.
+    minimo = 1
+
+    candidatos = []
+    for archivo in sorted(VAULT.rglob("*.md")) if VAULT.exists() else []:
+        try:
+            contenido = archivo.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for bloque in _bloques(contenido):
+            bajo = _normalizar(bloque)
+            distintas = sum(1 for c in claves if _coincide(c, bajo))
+            if distintas < minimo:
+                continue
+            repeticiones = sum(bajo.count(c) for c in claves)
+            candidatos.append(
+                (distintas * 10 + min(repeticiones, 9), archivo.stem, bloque)
+            )
+
+    if not candidatos:
+        return None
+    candidatos.sort(key=lambda c: (c[0], c[1]), reverse=True)
+
+    partes, total = [], 0
+    for _, fecha, bloque in candidatos[:MAX_FRAGMENTOS]:
+        linea = f"({fecha}) {bloque[:300].replace(chr(10), ' ').strip()}"
+        if total + len(linea) > MAX_CONTEXTO:
+            break
+        partes.append(linea)
+        total += len(linea)
+
+    if not partes:
+        return None
+    return (
+        "Notas anteriores del usuario que pueden venir al caso:\n"
+        + "\n".join(partes)
+    )
+
+
+# ----------------------------------------------------------------- herramientas
+
 def obtener_hora() -> str:
     from datetime import datetime
     return datetime.now().strftime("Son las %H:%M del %d de %B")
 
 
 def tomar_nota(texto: str) -> str:
-    with open("notas.txt", "a", encoding="utf-8") as f:
-        f.write(texto + "\n")
+    """Guarda una nota en el vault, en la nota del dia.
+
+    Solo aniade al final. Nunca modifica ni borra lo que ya existe: un
+    modelo de 3B confundido no puede estropear notas viejas.
+    """
+    from datetime import datetime
+
+    texto = texto.strip()
+    if not texto:
+        return "No entendi que anotar"
+    try:
+        _asegurar_vault()
+        archivo = NOTAS / f"{_hoy()}.md"
+        nuevo = not archivo.exists()
+        with archivo.open("a", encoding="utf-8") as f:
+            if nuevo:
+                f.write(f"# Notas del {_hoy()}\n\n#nota\n\n")
+            f.write(f"- {datetime.now().strftime('%H:%M')} — {texto}\n")
+    except OSError as e:
+        return f"No pude guardar la nota: {e}"
     return "Nota guardada"
 
 
@@ -243,7 +416,7 @@ def enrutar(texto: str) -> list:
     Cuando crezca el catalogo, esto pasa a ser una llamada corta al LLM."""
     t = texto.lower()
     categorias = {"general"}
-    if any(p in t for p in ["nota", "anota", "apunta", "recuerda"]):
+    if any(p in t for p in ["nota", "anota", "apunta"]):
         categorias.add("notas")
     if any(
         p in t
@@ -433,7 +606,19 @@ def main():
             historial.append({"role": "user", "content": texto})
             herramientas = enrutar(texto)
 
-            respuesta = preguntar(historial, herramientas)
+            # El recuerdo se inyecta solo para esta pregunta: no se guarda en
+            # el historial, que ya va justo de contexto.
+            recuerdo = recordar(texto)
+            contexto = historial
+            if recuerdo:
+                print("  [memoria: encontre algo relacionado]")
+                contexto = (
+                    historial[:-1]
+                    + [{"role": "system", "content": recuerdo}]
+                    + historial[-1:]
+                )
+
+            respuesta = preguntar(contexto, herramientas)
             historial.append(respuesta)
 
             # Una sola ronda de herramientas. Encadenar varias rompe a los modelos
@@ -450,6 +635,10 @@ def main():
                 contenido = f"{contenido} {CONFIRMACION}".strip()
             if contenido:
                 hablar(contenido)
+
+            # La memoria se escribe sola en cada turno. Si dependiera de que
+            # el modelo llame a una herramienta, tendria agujeros.
+            registrar_turno(texto, contenido)
 
             # Ventana corta: 8K de contexto se llena rapido.
             if len(historial) > 21:
