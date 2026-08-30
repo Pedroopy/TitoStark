@@ -88,7 +88,88 @@ def abrir_app(nombre: str) -> str:
     return f"Abriendo {nombre}"
 
 
+NAVEGADOR = r"C:\Program Files\Mozilla Firefox\firefox.exe"
+
+
+def _primer_video(consulta: str) -> str | None:
+    """Saca el ID del primer resultado de YouTube. Sin API key ni scraping
+    fragil: el ID aparece en el HTML de la pagina de resultados."""
+    import re
+    from urllib.parse import quote_plus
+
+    url = f"https://www.youtube.com/results?search_query={quote_plus(consulta)}"
+    try:
+        html = requests.get(
+            url,
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "es"},
+        ).text
+    except requests.RequestException:
+        return None
+    m = re.search(r'"videoId":"([\w-]{11})"', html)
+    return m.group(1) if m else None
+
+
+def ver_en_youtube(consulta: str) -> str:
+    """Reproduce el primer resultado de YouTube para lo que le pidas.
+
+    El modelo solo aporta el texto a buscar. La URL y el ejecutable los
+    arma este codigo: la linea del diseno se mantiene, el modelo nunca
+    escribe el comando.
+    """
+    import subprocess
+    from urllib.parse import quote_plus
+
+    consulta = consulta.strip()
+    if not consulta:
+        return "No entendi que quieres ver"
+
+    video = _primer_video(consulta)
+    if video:
+        destino = f"https://www.youtube.com/watch?v={video}"
+        aviso = f"Reproduciendo {consulta}"
+    else:
+        # Sin conexion o YouTube cambio el HTML: al menos deja la busqueda.
+        destino = f"https://www.youtube.com/results?search_query={quote_plus(consulta)}"
+        aviso = f"No pude elegir el video, te dejo la busqueda de {consulta}"
+
+    try:
+        subprocess.Popen([NAVEGADOR, destino])
+    except OSError as e:
+        return f"No pude abrir el navegador: {e}"
+    return aviso
+
+
 HERRAMIENTAS = {
+    "ver_en_youtube": {
+        "fn": ver_en_youtube,
+        "categoria": "pc",
+        "schema": {
+            "type": "function",
+            "function": {
+                "name": "ver_en_youtube",
+                "description": (
+                    "Busca en YouTube y reproduce el primer video que "
+                    "encuentre. Usala cuando pidan ver, poner o buscar "
+                    "un video, una cancion o un canal."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "consulta": {
+                            "type": "string",
+                            "description": (
+                                "Que buscar en YouTube, por ejemplo "
+                                "'elrubius ultimo video' o 'musica para "
+                                "concentrarse'"
+                            ),
+                        }
+                    },
+                    "required": ["consulta"],
+                },
+            },
+        },
+    },
     "obtener_hora": {
         "fn": obtener_hora,
         "categoria": "general",
@@ -151,7 +232,14 @@ def enrutar(texto: str) -> list:
     categorias = {"general"}
     if any(p in t for p in ["nota", "anota", "apunta", "recuerda"]):
         categorias.add("notas")
-    if any(p in t for p in ["abre", "abrir", "ejecuta", "lanza"]):
+    if any(
+        p in t
+        for p in [
+            "abre", "abrir", "ejecuta", "lanza",
+            "video", "youtube", "pon", "poner", "reproduce",
+            "busca", "cancion", "musica", "ver",
+        ]
+    ):
         categorias.add("pc")
     return [h["schema"] for h in HERRAMIENTAS.values() if h["categoria"] in categorias]
 

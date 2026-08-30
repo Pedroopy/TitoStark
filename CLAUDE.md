@@ -337,3 +337,39 @@ Whisper transcribe → qwen2.5:3b elige la herramienta → se ejecuta → Kokoro
 responde hablando. El hito que sostenía todo lo demás ya está.
 
 Siguiente: openWakeWord y Silero VAD, para dejar el push-to-talk.
+
+---
+
+## `ver_en_youtube`: parámetro sí, comando no
+
+La regla del diseño es que el modelo **no arma el comando**. Esta herramienta la
+respeta: el modelo solo aporta el texto a buscar, igual que ya aportaba el texto
+de una nota. La URL, el escapado y la ruta del ejecutable los construye el código.
+
+Funciona en dos pasos. Primero pide la página de resultados de YouTube y extrae
+el ID del primer video con una expresión regular sobre el campo `"videoId"` del
+HTML — sin API key. Después abre Firefox directamente en `watch?v=ID`, así el
+video se reproduce en vez de dejar una lista de resultados.
+
+Si no hay conexión o YouTube cambia el HTML, cae en abrir la página de búsqueda.
+Degrada, no falla.
+
+### Verificado
+
+| Se dijo | Herramienta elegida | Parámetro |
+|---|---|---|
+| "pon un video del rubius" | `ver_en_youtube` | `rubius ultimo video` |
+| "quiero ver el ultimo video de elrubius" | `ver_en_youtube` | `elrubius ultimo video` |
+| "busca musica para concentrarse en youtube" | `ver_en_youtube` | `musica para concentrarse` |
+| "abre el navegador" | `abrir_app` | `navegador` |
+| "hola que tal" | ninguna | — |
+
+Cinco de cinco. El enrutador suma las palabras `video`, `youtube`, `pon`,
+`reproduce`, `busca`, `cancion`, `musica` y `ver` a la categoría `pc`.
+
+### Lo que esto amplía
+
+`abrir_app` acepta cinco palabras fijas. Esta acepta texto libre, así que el
+modelo puede hacer abrir cualquier búsqueda de YouTube. Comparado con darle una
+shell es un riesgo menor, pero no es cero, y conviene tenerlo presente al agregar
+la siguiente herramienta con parámetro libre.
