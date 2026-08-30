@@ -480,7 +480,7 @@ plugin, ni servidor: Jarvis escribe archivos, Obsidian los muestra al instante.
 Eso convierte la "memoria persistente entre sesiones" del mes 2 en algo que ya
 está funcionando.
 
-**Ubicación: `C:\Users\Administrator\Documents\Jarvis`**, deliberadamente **fuera
+**Ubicación: `C:\Users\Administrator\Jarvis`**, deliberadamente **fuera
 del repositorio**. Las conversaciones son personales y no tienen por qué acabar
 en GitHub.
 
@@ -491,6 +491,12 @@ Jarvis/
 ```
 
 Para verlo en Obsidian: *Open folder as vault* y elegir esa carpeta.
+
+**Por qué no dentro del proyecto.** `TitoStark` se sube a GitHub. Metido ahí, el
+vault o acaba publicado, o queda en `.gitignore` y entonces un `git clean -xfd`
+lo borra sin preguntar, y clonar el proyecto en otro equipo llega sin memoria.
+El código y los datos tienen vidas distintas: `asistente.py` se va a reescribir
+muchas veces, y las conversaciones tienen que sobrevivir a eso.
 
 ### Se escribe sola, no por herramienta
 
