@@ -65,8 +65,8 @@ otro lado de la pieza y da la falsa impresión de que el problema es de software
 | Wake word | CPU | openWakeWord (permite entrenar palabra propia) |
 | Corte de voz (VAD) | CPU | Silero VAD |
 | Transcripción | CPU (o GPU si el CPU sufre) | faster-whisper `small`, int8 |
-| Cerebro | GPU | Qwen3 4B Q4_K_M vía Ollama |
-| Voz | CPU | Kokoro-82M (Piper si se prioriza velocidad sobre naturalidad) |
+| Cerebro | GPU | **qwen2.5:3b vía Ollama** (qwen3:4b descartado, ver comparativa) |
+| Voz | CPU | Kokoro-82M, voz `em_alex` |
 
 ### Por qué cada uno
 
@@ -138,8 +138,8 @@ Script en Python que escuche por micrófono, transcriba, llame al modelo con tre
 herramientas de juguete y responda por parlante. Feo y lento, pero vivo. Todo lo
 demás cuelga de esto.
 
-**Estado: esqueleto escrito** (`asistente.py`). Push-to-talk con Enter, sin wake
-word todavía.
+**Estado: COMPLETA.** El ciclo entero funciona verificado con voz real.
+Ver "Estado al cerrar" al final del documento.
 
 ### Semanas 2 y 3 — wake word y streaming
 Que deje de ser "aprieto Enter y hablo" y pase a estar siempre escuchando.
@@ -172,20 +172,25 @@ Bajar latencia, personalidad, refinamiento del manejo de interrupciones.
 
 ## Estructura del código actual
 
-`asistente.py` (escrito para Linux; en Windows hay que cambiar la lista blanca de
-`abrir_app` por rutas de ejecutables, el resto es multiplataforma).
+`asistente.py`, ya adaptado a Windows.
 
 ```
-configuración      OLLAMA, MODELO, SAMPLE_RATE, SISTEMA
-herramientas       obtener_hora, tomar_nota, abrir_app
+configuración      OLLAMA, MODELO, SAMPLE_RATE, NOMBRE, VOZ, CONFIRMACION,
+                   SISTEMA, y los cuatro límites del VAD
+herramientas       obtener_hora, tomar_nota, abrir_app, ver_en_youtube
                    cada una con su función + schema formato OpenAI + categoría
 enrutar()          filtra herramientas por palabras clave según intención
-grabar()           push-to-talk con sounddevice, el VAD viene después
-hablar()           Kokoro con fallback a imprimir en consola
+_cargar_vad()      carga Silero una sola vez, en CPU
+grabar()           un Enter para empezar, corta sola por silencio (Silero VAD)
+hablar()           Kokoro con voz VOZ, fallback a imprimir en consola
 preguntar()        POST a Ollama con num_ctx 8192
-ejecutar_...()     despacha tool_calls, atrapa errores por herramienta
-main()             carga Whisper, bucle de conversación, ventana de 20 mensajes
+ejecutar_...()     despacha tool_calls, devuelve (resultados, todo_ok)
+main()             carga Whisper, bucle, añade CONFIRMACION tras cada tarea
 ```
+
+`benchmark_modelos.py` compara modelos de Ollama midiendo tool calling,
+latencia, tokens por segundo y reparto CPU/GPU. Volver a correrlo al cambiar
+de GPU.
 
 ### Instalación
 
@@ -203,11 +208,11 @@ ollama pull qwen3:4b
 
 ## Próximos pasos concretos
 
-1. Levantar `asistente.py` y confirmar que el ciclo completo funciona
-2. Medir la latencia real de cada etapa por separado, para saber dónde optimizar
+1. ~~Levantar `asistente.py` y confirmar que el ciclo completo funciona~~ **hecho**
+2. ~~Medir la latencia real de cada etapa por separado~~ **hecho**
 3. Decidir si se adopta Home Assistant como columna vertebral o se sigue con
-   orquestador propio
-4. Agregar openWakeWord y Silero VAD
+   orquestador propio — **pendiente, no bloquea nada**
+4. Agregar openWakeWord y Silero VAD — **Silero hecho, falta openWakeWord**
 
 ---
 
@@ -387,3 +392,81 @@ revisarlo: capta más ambiente, así que probablemente haya que **subir**
 `UMBRAL_VOZ` para que el ruido de la pieza no cuente como voz.
 
 El push-to-talk se redujo a un solo Enter. Falta el wake word para eliminarlo.
+
+---
+
+# Estado al cerrar — 30 de agosto de 2026
+
+**Empezar leyendo esto.** El resto del documento es el razonamiento; esta sección
+es dónde quedó todo.
+
+## Funciona, verificado con voz real
+
+El ciclo completo: aprietas Enter, hablas, y Jarvis transcribe, decide, ejecuta y
+te responde hablando. Probado en vivo, no solo en pruebas sintéticas.
+
+| Pieza | Estado |
+|---|---|
+| Repositorio | `Pedroopy/TitoStark` en GitHub, privado |
+| Ubicación | `C:\Users\Administrator\Proyectos\TitoStark` |
+| Entorno | `.venv` con todo instalado, Python 3.12.10 |
+| Modelo | `qwen2.5:3b`, 100% en GPU, contexto 8192 |
+| Transcripción | faster-whisper `small` int8, en CPU |
+| Voz | Kokoro, `em_alex` (masculina) |
+| Corte de voz | Silero VAD, ajustado y validado |
+| Herramientas | `obtener_hora`, `tomar_nota`, `abrir_app`, `ver_en_youtube` |
+| Latencia | ~4 a 5 segundos por turno |
+
+## Cómo levantarlo
+
+```
+cd C:\Users\Administrator\Proyectos\TitoStark
+.\.venv\Scripts\python.exe asistente.py
+```
+
+Si responde por consola en vez de hablar, faltan los pesos de Kokoro: ver la
+sección correspondiente más arriba.
+
+## Personalidad
+
+Se llama **Jarvis**, trata al usuario de "señor", y dice **"Tarea hecha, señor."**
+después de cada herramienta ejecutada con éxito. Esa frase está en código
+(constante `CONFIRMACION`), no en el prompt: un modelo de 3B se olvida de decirla
+y queda inconsistente. Solo se dice cuando una herramienta corrió de verdad y sin
+error, para no sonar tras una charla cualquiera ni tapar un fallo.
+
+## Lo que cambió respecto al plan original
+
+1. **El modelo.** `qwen3:4b` era la elección del diseño, pero razona antes de
+   responder y no entra en 4 GB: 18 a 37 segundos por respuesta. `qwen2.5:3b`
+   hace lo mismo en 2.8 s y entra entero en la GPU. El contexto 8192 del diseño
+   original **sí se sostiene**, con el modelo correcto.
+2. **El plan B del tool calling queda archivado.** No hizo falta abandonar JSON
+   por formatos de texto plano: 4 de 4 en JSON, incluido el caso negativo.
+3. **La regla de la lista blanca sigue intacta**, pero ahora hay una herramienta
+   con parámetro libre (`ver_en_youtube`). El modelo aporta el texto a buscar;
+   la URL y el ejecutable los arma el código.
+
+## Pendientes, en orden
+
+1. **openWakeWord.** Es lo único que separa esto de un asistente siempre
+   encendido. Conviene hacerlo *después* de tener el micrófono con array: el
+   ajuste del umbral depende del micrófono y no vale la pena afinarlo dos veces.
+2. **Micrófono con array.** El headset HyperX sirve para push-to-talk de cerca,
+   pero el wake word solo tiene sentido si escucha desde el otro lado de la pieza.
+3. **Voz tipo JARVIS.** Kokoro solo tiene dos voces masculinas en español y
+   ninguna se parece al mayordomo británico. El camino es Qwen3-TTS con clonación
+   de voz, a costa de ~0.5 s más por respuesta. Ojo: se acerca al timbre, no al
+   acento inglés, que viene del idioma del modelo.
+4. **Home Assistant.** No bloquea nada. Recomendación: instalarlo cuando llegue
+   la domótica y usarlo *como herramienta* desde el orquestador propio, en vez de
+   migrar a su Assist. Lo que hay funciona; migrar sería cambiar algo probado por
+   algo desconocido.
+
+## Detalles menores anotados
+
+- A la 1:47 de la madrugada dice "de la noche". El modelo interpreta el formato
+  de 24 horas de forma discutible. Se arregla con una línea en el prompt de
+  sistema, si llega a molestar.
+- Los ajustes del VAD están atados al headset. Con el micrófono de array habrá
+  que **subir** `UMBRAL_VOZ`, porque captará más ambiente.
