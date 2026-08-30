@@ -298,3 +298,42 @@ para tool calling confiable.
 La sección "Si el tool calling en JSON falla mucho" preveía tener que abandonar
 JSON por formatos de texto plano. Con qwen2.5:3b **no hace falta**: 4 de 4 en
 JSON, incluyendo el caso negativo. Ese plan B queda archivado, no descartado.
+
+---
+
+## Pesos de Kokoro (no van en el repositorio)
+
+`pip install kokoro-onnx` instala la librería pero **no** los pesos. Hay que
+bajarlos a la raíz del proyecto, donde `hablar()` los busca por nombre relativo:
+
+```bash
+curl -sSL -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+curl -sSL -O https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+```
+
+Son 311 MB y 27 MB. El `.gitignore` los excluye. Si al clonar el proyecto en otra
+máquina el asistente responde por consola en vez de hablar, es que faltan estos
+dos archivos.
+
+Voces en español: `ef_dora` (femenina), `em_alex` y `em_santa` (masculinas). Las
+que empiezan con `pf_` o `pm_` son portuguesas.
+
+### Latencia por etapa, medida
+
+| Etapa | Tiempo |
+|---|---|
+| Transcripción (Whisper `small`, CPU) | 1 a 2 s |
+| Modelo (qwen2.5:3b, 100% GPU) | ~2.8 s |
+| Síntesis (Kokoro, CPU) | ~0.7 s |
+| **Total por turno** | **~4 a 5 s** |
+
+Kokoro carga en 1.3 s la primera vez y queda en memoria. El cuello de botella es
+el modelo, y después Whisper: son los dos lugares donde vale la pena optimizar.
+
+## Estado: la semana 1 está cerrada
+
+El ciclo completo funciona de punta a punta, verificado con voz real: micrófono →
+Whisper transcribe → qwen2.5:3b elige la herramienta → se ejecuta → Kokoro
+responde hablando. El hito que sostenía todo lo demás ya está.
+
+Siguiente: openWakeWord y Silero VAD, para dejar el push-to-talk.
