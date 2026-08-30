@@ -1,0 +1,41 @@
+# Entornos virtuales de Python
+.venv/
+venv/
+env/
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Modelos y pesos descargados (varios GB, no van a Git)
+models/
+modelos/
+*.onnx
+*.bin
+*.gguf
+*.pt
+*.pth
+
+# Audio grabado o generado durante pruebas
+*.wav
+*.mp3
+grabaciones/
+
+# Notas y datos locales del asistente
+notas.txt
+memoria/
+*.db
+*.sqlite3
+
+# Secretos y configuracion local
+.env
+.env.local
+config.local.*
+
+# Sistema y editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
