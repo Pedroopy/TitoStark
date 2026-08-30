@@ -33,6 +33,13 @@ OLLAMA = "http://localhost:11434/api/chat"
 MODELO = "qwen2.5:3b"  # medido: 100% GPU, 2.3GB, 4/4 en tool calling
 SAMPLE_RATE = 16000
 
+# --- ajuste del VAD (Silero) ---
+VAD_CHUNK = 512        # muestras por ventana; Silero exige 512 a 16 kHz
+UMBRAL_VOZ = 0.5       # mas alto = menos falsos positivos, mas te ignora
+SILENCIO_FINAL = 0.8   # segundos de silencio para dar la frase por terminada
+ESPERA_INICIAL = 5.0   # segundos esperando a que empieces a hablar
+MAX_DURACION = 30.0    # tope duro por si el ruido nunca deja ver silencio
+
 SISTEMA = """Eres un asistente de voz. Respondes en espanol, en frases cortas,
 como hablaria una persona. Nada de listas ni markdown: esto se lee en voz alta.
 Si necesitas una herramienta, usala sin anunciarlo."""
@@ -151,25 +158,90 @@ def enrutar(texto: str) -> list:
 
 # ------------------------------------------------------------------------ audio
 
+def _cargar_vad():
+    """Carga Silero una sola vez. Corre en CPU: no le quita VRAM al modelo."""
+    global _vad
+    if "_vad" not in globals():
+        import torch
+
+        from silero_vad import load_silero_vad
+
+        torch.set_num_threads(1)  # sin esto pelea con Whisper por los nucleos
+        _vad = load_silero_vad()
+    return _vad
+
+
 def grabar() -> np.ndarray:
-    """Graba hasta que el usuario apreta Enter. El VAD viene en la semana 2."""
+    """Graba y corta sola cuando detecta que dejaste de hablar.
+
+    Espera a que empieces a hablar, y desde ahi corta tras SILENCIO_FINAL
+    segundos seguidos sin voz. Los tres limites de abajo son el dial entre
+    cortarte a mitad de frase y quedarse esperando para siempre.
+    """
+    import torch
+
+    vad = _cargar_vad()
+    vad.reset_states()  # sin esto el estado de la frase anterior contamina
+
     buffer = queue.Queue()
-    detener = threading.Event()
 
     def callback(indata, frames, time_info, status):
         buffer.put(indata.copy())
 
+    trozos = []
+    hablando = False
+    chunks_silencio = 0
+    chunks_totales = 0
+
+    # Silero trabaja con ventanas de 512 muestras a 16 kHz = 32 ms.
+    por_segundo = SAMPLE_RATE / VAD_CHUNK
+    limite_silencio = int(SILENCIO_FINAL * por_segundo)
+    limite_espera = int(ESPERA_INICIAL * por_segundo)
+    limite_total = int(MAX_DURACION * por_segundo)
+
     stream = sd.InputStream(
-        samplerate=SAMPLE_RATE, channels=1, dtype="float32", callback=callback
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        dtype="float32",
+        blocksize=VAD_CHUNK,
+        callback=callback,
     )
     with stream:
-        print("  [grabando... Enter para cortar]")
-        input()
-        detener.set()
+        print("  [escuchando... corta solo al terminar de hablar]")
+        while True:
+            try:
+                chunk = buffer.get(timeout=1.0)
+            except queue.Empty:
+                break
 
-    trozos = []
-    while not buffer.empty():
-        trozos.append(buffer.get())
+            trozos.append(chunk)
+            chunks_totales += 1
+
+            plano = chunk.flatten()
+            if len(plano) != VAD_CHUNK:
+                continue
+
+            with torch.no_grad():
+                prob = vad(torch.from_numpy(plano), SAMPLE_RATE).item()
+
+            if prob >= UMBRAL_VOZ:
+                hablando = True
+                chunks_silencio = 0
+            elif hablando:
+                chunks_silencio += 1
+                if chunks_silencio >= limite_silencio:
+                    break
+
+            # Nunca empezaste a hablar: no te quedes colgado.
+            if not hablando and chunks_totales >= limite_espera:
+                print("  [no escuche nada]")
+                return np.array([], dtype=np.float32)
+
+            # Tope duro, por si el ruido de fondo nunca deja ver silencio.
+            if chunks_totales >= limite_total:
+                print("  [corte por limite de duracion]")
+                break
+
     if not trozos:
         return np.array([], dtype=np.float32)
     return np.concatenate(trozos).flatten()
