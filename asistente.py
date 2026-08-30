@@ -30,7 +30,7 @@ from faster_whisper import WhisperModel
 # ---------------------------------------------------------------- configuracion
 
 OLLAMA = "http://localhost:11434/api/chat"
-MODELO = "qwen3:4b"
+MODELO = "qwen2.5:3b"  # medido: 100% GPU, 2.3GB, 4/4 en tool calling
 SAMPLE_RATE = 16000
 
 SISTEMA = """Eres un asistente de voz. Respondes en espanol, en frases cortas,

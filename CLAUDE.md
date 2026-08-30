@@ -254,3 +254,47 @@ cuando exista la RTX 3060 de 12 GB de la ruta de upgrade.
 - Micrófono detectado: headset HyperX. Sirve para push-to-talk de cerca; el
   micrófono con array del documento sigue pendiente para uso a distancia.
 - `torch` quedó en versión CPU, que es lo deseado: no compite por VRAM.
+
+---
+
+## Comparativa de modelos (30-08-2026)
+
+Medido con `benchmark_modelos.py`, contexto 4096, las tres herramientas reales
+del asistente y cuatro escenarios: pedir la hora, tomar una nota, abrir una app,
+y un saludo que **no** debe disparar ninguna herramienta.
+
+| Modelo | Tool calling | Latencia media | tok/s | Reparto |
+|---|---|---|---|---|
+| **qwen2.5:3b** | **4/4** | **2.8 s** | **63.8** | **100% GPU** |
+| qwen3:4b | 4/4 | 18.7 s | 19.0 | 33% / 67% |
+| llama3.2:3b | 3/4 | 2.9 s | 45.7 | 20% / 80% |
+| qwen2.5:1.5b | 2/4 | 2.5 s | 99.1 | 100% GPU |
+
+### Decisión: qwen2.5:3b
+
+Único modelo que acierta las cuatro herramientas y entra completo en la GPU.
+Ocupa 2.3 GB, deja ~1.8 GB libres y sostiene **contexto 8192 sin salir de la
+GPU**: el supuesto de 8K del diseño original se recupera, y a 63 tok/s.
+
+Latencia de respuesta hablada: **2.8 segundos**, dentro del objetivo de 2 a 4.
+
+### Por qué se descartaron los otros
+
+**qwen3:4b** acierta igual las cuatro herramientas, pero su modo de razonamiento
+y el desborde a CPU lo dejan seis veces más lento. Es el modelo correcto para la
+RTX 3060 de la ruta de upgrade, no para la 1650.
+
+**llama3.2:3b** falla el caso más importante: ante un simple "hola, ¿cómo estás?"
+llama a `obtener_hora`. Inventar una herramienta donde no hace falta es peor que
+ser lento, porque el asistente ejecuta acciones que nadie pidió.
+
+**qwen2.5:1.5b** es el más rápido y el más inútil: 2 de 4. Ante "¿qué hora es?"
+se inventó "las 14:23" en vez de llamar a la herramienta, y ante la petición de
+tomar nota se puso a preguntar qué anotar. Confirma que 1.5B es demasiado poco
+para tool calling confiable.
+
+### Lo que esto valida del diseño original
+
+La sección "Si el tool calling en JSON falla mucho" preveía tener que abandonar
+JSON por formatos de texto plano. Con qwen2.5:3b **no hace falta**: 4 de 4 en
+JSON, incluyendo el caso negativo. Ese plan B queda archivado, no descartado.
