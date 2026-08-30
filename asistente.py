@@ -42,6 +42,10 @@ MAX_DURACION = 30.0    # tope duro por si el ruido nunca deja ver silencio
 
 NOMBRE = "JARVIS"
 
+# Voces en espanol de Kokoro: em_alex y em_santa (masculinas),
+# ef_dora (femenina). Las pf_/pm_ son portuguesas.
+VOZ = "em_alex"
+
 # Se dice sola despues de cada herramienta ejecutada con exito. Va en codigo
 # y no en el prompt a proposito: un modelo de 3B se olvida, el codigo no.
 CONFIRMACION = "Tarea hecha, señor."
@@ -351,7 +355,7 @@ def hablar(texto: str):
         global _kokoro
         if "_kokoro" not in globals():
             _kokoro = Kokoro("kokoro-v1.0.onnx", "voices-v1.0.bin")
-        audio, sr = _kokoro.create(texto, voice="ef_dora", lang="es")
+        audio, sr = _kokoro.create(texto, voice=VOZ, lang="es")
         sd.play(audio, sr)
         sd.wait()
     except Exception as e:
