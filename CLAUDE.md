@@ -373,3 +373,17 @@ Cinco de cinco. El enrutador suma las palabras `video`, `youtube`, `pon`,
 modelo puede hacer abrir cualquier búsqueda de YouTube. Comparado con darle una
 shell es un riesgo menor, pero no es cero, y conviene tenerlo presente al agregar
 la siguiente herramienta con parámetro libre.
+
+---
+
+## VAD ajustado y validado
+
+`SILENCIO_FINAL = 0.8` probado con voz real y el headset HyperX: no corta a
+mitad de frase ni se siente lento. El resto de los valores por defecto también
+quedan (`UMBRAL_VOZ = 0.5`, `ESPERA_INICIAL = 5.0`, `MAX_DURACION = 30.0`).
+
+Este ajuste está atado al micrófono. Cuando llegue el de array habrá que
+revisarlo: capta más ambiente, así que probablemente haya que **subir**
+`UMBRAL_VOZ` para que el ruido de la pieza no cuente como voz.
+
+El push-to-talk se redujo a un solo Enter. Falta el wake word para eliminarlo.
