@@ -69,7 +69,7 @@ usala sin anunciarlo."""
 # Un vault de Obsidian es solo una carpeta con archivos .md. No hace falta
 # plugin ni API: Jarvis escribe archivos, Obsidian los muestra al instante.
 # Vive FUERA del repositorio: las conversaciones son personales.
-VAULT = pathlib.Path(r"C:\Users\Administrator\Documents\Jarvis")
+VAULT = pathlib.Path(r"C:\Users\Administrator\Jarvis")
 CONVERSACIONES = VAULT / "Conversaciones"
 NOTAS = VAULT / "Notas"
 
